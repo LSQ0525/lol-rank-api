@@ -89,7 +89,7 @@ def home():
 
 @app.route("/krrank")
 def krrank():
-    game_name = "collage"
+    game_name = "Collage"
     tag_line = "1224"
     lol_url = "https://kr.api.riotgames.com"
 
