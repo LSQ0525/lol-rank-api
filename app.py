@@ -13,6 +13,10 @@ API_KEY = os.getenv("RIOT_API_KEY")
 ACCOUNT_URL = "https://asia.api.riotgames.com"
 
 
+def plain_text(text: str):
+    return Response(text, mimetype="text/plain; charset=utf-8")
+
+
 def riot_get(url: str):
     headers = {
         "X-Riot-Token": API_KEY
@@ -22,89 +26,89 @@ def riot_get(url: str):
 
 def get_rank_text(game_name: str, tag_line: str, lol_url: str):
     if not API_KEY:
-        return "錯誤：找不到 RIOT_API_KEY"
+        return "錯誤：找不到 RIOT_API_KEY，請確認 Render Environment Variables 是否有設定 RIOT_API_KEY"
 
-    encoded_name = quote(game_name)
-    encoded_tag = quote(tag_line)
+    encoded_name = quote(game_name, safe="")
+    encoded_tag = quote(tag_line, safe="")
 
-    # 1. Riot ID -> PUUID
-    account_url = f"{ACCOUNT_URL}/riot/account/v1/accounts/by-riot-id/{encoded_name}/{encoded_tag}"
-    r = riot_get(account_url)
+    try:
+        # 1. Riot ID -> PUUID
+        account_api = f"{ACCOUNT_URL}/riot/account/v1/accounts/by-riot-id/{encoded_name}/{encoded_tag}"
+        r = riot_get(account_api)
 
-    if r.status_code != 200:
-        return f"{game_name}#{tag_line}：取得 PUUID 失敗，HTTP {r.status_code}"
+        if r.status_code != 200:
+            return f"{game_name}#{tag_line}：取得 PUUID 失敗，HTTP {r.status_code}"
 
-    account_data = r.json()
-    puuid = account_data.get("puuid")
+        account_data = r.json()
+        puuid = account_data.get("puuid")
 
-    if not puuid:
-        return f"{game_name}#{tag_line}：找不到 PUUID"
+        if not puuid:
+            return f"{game_name}#{tag_line}：找不到 PUUID"
 
-    # 2. PUUID -> Summoner ID
-    summoner_url = f"{lol_url}/lol/summoner/v4/summoners/by-puuid/{puuid}"
-    r = riot_get(summoner_url)
+        # 2. 直接用 PUUID 查 Ranked Data
+        rank_api = f"{lol_url}/lol/league/v4/entries/by-puuid/{puuid}"
+        r = riot_get(rank_api)
 
-    if r.status_code != 200:
-        return f"{game_name}#{tag_line}：取得召喚師資料失敗，HTTP {r.status_code}"
+        if r.status_code != 200:
+            return f"{game_name}#{tag_line}：取得牌位失敗，HTTP {r.status_code}"
 
-    summoner_data = r.json()
-    summoner_id = summoner_data.get("id")
+        ranked_data = r.json()
 
-    if not summoner_id:
-        return f"{game_name}#{tag_line}：找不到 Summoner ID"
+        solo = next(
+            (x for x in ranked_data if x.get("queueType") == "RANKED_SOLO_5x5"),
+            None
+        )
 
-    # 3. Summoner ID -> Ranked Data
-    rank_url = f"{lol_url}/lol/league/v4/entries/by-summoner/{summoner_id}"
-    r = riot_get(rank_url)
+        if not solo:
+            return f"{game_name}#{tag_line}：目前沒有單雙排資料"
 
-    if r.status_code != 200:
-        return f"{game_name}#{tag_line}：取得牌位失敗，HTTP {r.status_code}"
+        tier = solo.get("tier", "")
+        rank = solo.get("rank", "")
+        lp = solo.get("leaguePoints", 0)
+        wins = solo.get("wins", 0)
+        losses = solo.get("losses", 0)
 
-    ranked_data = r.json()
+        total = wins + losses
+        winrate = (wins / total * 100) if total > 0 else 0
 
-    solo = next(
-        (x for x in ranked_data if x.get("queueType") == "RANKED_SOLO_5x5"),
-        None
-    )
+        return f"{game_name}#{tag_line}：{tier} {rank} {lp}LP / {wins}W-{losses}L / 勝率 {winrate:.1f}%"
 
-    if not solo:
-        return f"{game_name}#{tag_line}：目前沒有單雙排資料"
+    except requests.exceptions.Timeout:
+        return f"{game_name}#{tag_line}：查詢逾時，請稍後再試"
 
-    tier = solo.get("tier", "")
-    rank = solo.get("rank", "")
-    lp = solo.get("leaguePoints", 0)
-    wins = solo.get("wins", 0)
-    losses = solo.get("losses", 0)
+    except requests.exceptions.RequestException:
+        return f"{game_name}#{tag_line}：連線 Riot API 失敗，請稍後再試"
 
-    total = wins + losses
-    winrate = (wins / total * 100) if total > 0 else 0
-
-    return f"{game_name}#{tag_line}：{tier} {rank} {lp}LP / {wins}W-{losses}L / 勝率 {winrate:.1f}%"
+    except Exception as e:
+        return f"{game_name}#{tag_line}：程式錯誤：{str(e)}"
 
 
 @app.route("/")
 def home():
-    return Response("API is running", mimetype="text/plain")
+    return plain_text("API is running")
 
 
+@app.route("/kr")
 @app.route("/krrank")
-def krrank():
+def kr_rank():
     game_name = "Collage"
     tag_line = "1224"
     lol_url = "https://kr.api.riotgames.com"
 
     result = get_rank_text(game_name, tag_line, lol_url)
-    return Response(result, mimetype="text/plain; charset=utf-8")
+    return plain_text(result)
 
 
+@app.route("/tw")
 @app.route("/twrank")
-def twrank():
+def tw_rank():
     game_name = "Ziv"
     tag_line = "5566"
     lol_url = "https://tw2.api.riotgames.com"
 
     result = get_rank_text(game_name, tag_line, lol_url)
-    return Response(result, mimetype="text/plain; charset=utf-8")
+    return plain_text(result)
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
