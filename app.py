@@ -106,7 +106,6 @@ def twrank():
     result = get_rank_text(game_name, tag_line, lol_url)
     return Response(result, mimetype="text/plain; charset=utf-8")
 
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
